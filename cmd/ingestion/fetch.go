@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/bryanngzh/parklah-go/internal/hdb"
 	"github.com/bryanngzh/parklah-go/internal/ura"
 )
 
@@ -91,6 +92,14 @@ func logStaticCarparkDataSummary(data staticCarparkData) {
 func logAvailabilitySummary(availability []ura.CarparkAvailabilityResponse) {
     fmt.Printf("\n[Carpark Availability] Fetched %d records\n", len(availability))
     printSample(availability)
+}
+
+func fetchHDBStaticData(client *hdb.HDBClient) ([]hdb.CarparkInfoResponse, error) {
+	return client.FetchCarparkInfo()
+}
+
+func fetchHDBAvailability(client *hdb.HDBClient) (hdb.CarparkAvailabilityResponse, error) {
+	return client.FetchCarparkAvailability()
 }
 
 func printSample[T any](items []T) {

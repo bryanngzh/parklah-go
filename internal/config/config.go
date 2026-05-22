@@ -19,6 +19,9 @@ type Config struct {
 	// URA
 	URAAccessKey string
 
+	// HDB / data.gov.sg
+	DataGovAPIKey string
+
 	// Environment
 	Env string
 }
@@ -26,7 +29,7 @@ type Config struct {
 // Loads env variables
 func Load() *Config {
 	// reads .env file and sets them as env variables
-	_ = godotenv.Load("../../.env")
+	_ = godotenv.Load(".env")
 
 
 	cfg := &Config{
@@ -36,8 +39,9 @@ func Load() *Config {
 		DBHost: getEnvOrFail("POSTGRES_HOST"),
 		DBPort: getEnvOrDefault("POSTGRES_PORT", "5433"),
 		DBSSLMode: getEnvOrDefault("POSTGRES_SSLMODE", "disable"),
-		URAAccessKey: getEnvOrFail("URA_ACCESS_KEY"),
-		Env: getEnvOrDefault("ENV", "development"),
+		URAAccessKey:  getEnvOrFail("URA_ACCESS_KEY"),
+		DataGovAPIKey: getEnvOrDefault("DATA_GOV_API_KEY", ""),
+		Env:           getEnvOrDefault("ENV", "development"),
 	}
 
 	log.Printf("[config] Loaded configuration for envrionment: %s", cfg.Env)
