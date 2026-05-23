@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/bryanngzh/parklah-go/internal/models"
@@ -45,4 +46,40 @@ func UpsertFeaturesBatch(ctx context.Context, pool *pgxpool.Pool, features []mod
 		}
 	}
 	return br.Close()
+}
+
+// --- Query types & functions ---
+
+type FeaturesRow struct {
+	ShortTermParking  string
+	FreeParking       string
+	NightParking      bool
+	CarParkDecks      int
+	GantryHeight      float64
+	CarParkBasement   bool
+	IsCentralArea     bool
+	IsPeakHourCarpark bool
+}
+
+func GetFeatures(ctx context.Context, pool *pgxpool.Pool, code, source string) (*FeaturesRow, error) {
+	const sql = `
+		SELECT COALESCE(short_term_parking, ''), COALESCE(free_parking, ''),
+		       night_parking, car_park_decks, gantry_height, car_park_basement,
+		       is_central_area, is_peak_hour_carpark
+		FROM carpark_features
+		WHERE carpark_code = $1 AND data_source = $2`
+
+	var r FeaturesRow
+	err := pool.QueryRow(ctx, sql, code, source).Scan(
+		&r.ShortTermParking, &r.FreeParking,
+		&r.NightParking, &r.CarParkDecks, &r.GantryHeight, &r.CarParkBasement,
+		&r.IsCentralArea, &r.IsPeakHourCarpark,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("query features %s/%s: %w", source, code, err)
+	}
+	return &r, nil
 }

@@ -22,6 +22,9 @@ type Config struct {
 	// HDB / data.gov.sg
 	DataGovAPIKey string
 
+	// API
+	APIPort string
+
 	// Environment
 	Env string
 }
@@ -41,6 +44,7 @@ func Load() *Config {
 		DBSSLMode: getEnvOrDefault("POSTGRES_SSLMODE", "disable"),
 		URAAccessKey:  getEnvOrFail("URA_ACCESS_KEY"),
 		DataGovAPIKey: getEnvOrDefault("DATA_GOV_API_KEY", ""),
+		APIPort:       getEnvOrDefault("API_PORT", "8080"),
 		Env:           getEnvOrDefault("ENV", "development"),
 	}
 

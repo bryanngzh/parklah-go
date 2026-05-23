@@ -69,3 +69,71 @@ func UpsertSeasonRates(ctx context.Context, pool *pgxpool.Pool, rates []models.S
 	}
 	return br.Close()
 }
+
+// --- Query types & functions ---
+
+type ShortTermRateRow struct {
+	VehicleType  string
+	DayType      string
+	StartTime    string
+	EndTime      string
+	RatePer30Min float64
+	MinDuration  string
+}
+
+type SeasonRateRow struct {
+	VehicleType string
+	TicketType  string
+	ParkingHrs  string
+	MonthlyRate float64
+}
+
+func GetShortTermRates(ctx context.Context, pool *pgxpool.Pool, code, source string) ([]ShortTermRateRow, error) {
+	const sql = `
+		SELECT vehicle_type, day_type,
+		       COALESCE(start_time::text, ''), COALESCE(end_time::text, ''),
+		       rate_per_30min, COALESCE(min_duration, '')
+		FROM carpark_short_term_rates
+		WHERE carpark_code = $1 AND data_source = $2
+		ORDER BY vehicle_type, day_type, start_time`
+
+	rows, err := pool.Query(ctx, sql, code, source)
+	if err != nil {
+		return nil, fmt.Errorf("query short-term rates: %w", err)
+	}
+	defer rows.Close()
+
+	var results []ShortTermRateRow
+	for rows.Next() {
+		var r ShortTermRateRow
+		if err := rows.Scan(&r.VehicleType, &r.DayType, &r.StartTime, &r.EndTime, &r.RatePer30Min, &r.MinDuration); err != nil {
+			return nil, fmt.Errorf("scan short-term rate: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func GetSeasonRates(ctx context.Context, pool *pgxpool.Pool, code, source string) ([]SeasonRateRow, error) {
+	const sql = `
+		SELECT vehicle_type, ticket_type, COALESCE(parking_hrs, ''), monthly_rate
+		FROM carpark_season_rates
+		WHERE carpark_code = $1 AND data_source = $2
+		ORDER BY vehicle_type, ticket_type`
+
+	rows, err := pool.Query(ctx, sql, code, source)
+	if err != nil {
+		return nil, fmt.Errorf("query season rates: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SeasonRateRow
+	for rows.Next() {
+		var r SeasonRateRow
+		if err := rows.Scan(&r.VehicleType, &r.TicketType, &r.ParkingHrs, &r.MonthlyRate); err != nil {
+			return nil, fmt.Errorf("scan season rate: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
