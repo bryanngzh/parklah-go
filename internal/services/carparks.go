@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
@@ -9,17 +10,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+var sgt = time.FixedZone("SGT", 8*60*60)
+
 type NearbyCarparkResult struct {
-	CarparkCode   string     `json:"carpark_code"`
-	CarparkName   string     `json:"carpark_name"`
-	DataSource    string     `json:"data_source"`
-	Lat           float64    `json:"lat"`
-	Lon           float64    `json:"lon"`
-	DistanceM     float64    `json:"distance_m"`
-	ParkingSystem *string    `json:"parking_system"`
-	TotalLots     *int       `json:"total_lots"`
-	LotsAvailable *int       `json:"lots_available"`
-	SnapshotTime  *time.Time `json:"snapshot_time"`
+	CarparkCode   string               `json:"carpark_code"`
+	CarparkName   string               `json:"carpark_name"`
+	DataSource    string               `json:"data_source"`
+	Lat           float64              `json:"lat"`
+	Lon           float64              `json:"lon"`
+	DistanceM     float64              `json:"distance_m"`
+	ParkingSystem *string              `json:"parking_system"`
+	Availability  []AvailabilityDetail `json:"availability"`
 }
 
 type NearbyMeta struct {
@@ -35,7 +36,6 @@ type CarparkDetail struct {
 	ParkingSystem *string              `json:"parking_system"`
 	Lat           *float64             `json:"lat"`
 	Lon           *float64             `json:"lon"`
-	TotalLots     *int                 `json:"total_lots"`
 	Features      *FeaturesDetail      `json:"features"`
 	Availability  []AvailabilityDetail `json:"availability"`
 }
@@ -70,6 +70,7 @@ type ShortTermRateResult struct {
 	EndTime      string  `json:"end_time"`
 	RatePer30Min float64 `json:"rate_per_30min"`
 	MinDuration  string  `json:"min_duration,omitempty"`
+	IsCurrent    bool    `json:"is_current"`
 }
 
 type SeasonRateResult struct {
@@ -79,7 +80,7 @@ type SeasonRateResult struct {
 	MonthlyRate float64 `json:"monthly_rate"`
 }
 
-func GetNearby(ctx context.Context, pool *pgxpool.Pool, lat, lon, radiusM float64, vehicleType string, limit int) ([]NearbyCarparkResult, NearbyMeta, error) {
+func GetNearby(ctx context.Context, pool *pgxpool.Pool, lat, lon, radiusM float64, limit int) ([]NearbyCarparkResult, NearbyMeta, error) {
 	nearby, err := repository.GetNearby(ctx, pool, lat, lon, radiusM, limit)
 	if err != nil {
 		return nil, NearbyMeta{}, err
@@ -98,17 +99,25 @@ func GetNearby(ctx context.Context, pool *pgxpool.Pool, lat, lon, radiusM float6
 		return nil, NearbyMeta{}, err
 	}
 
-	availMap := make(map[string]repository.AvailabilityRow)
+	availMap := make(map[string][]AvailabilityDetail)
 	for _, a := range avail {
-		if a.VehicleType == vehicleType {
-			key := a.CarparkCode + ":" + a.DataSource
-			availMap[key] = a
-		}
+		key := a.CarparkCode + ":" + a.DataSource
+		availMap[key] = append(availMap[key], AvailabilityDetail{
+			VehicleType:   a.VehicleType,
+			LotsAvailable: a.LotsAvailable,
+			TotalLots:     a.TotalLots,
+			SnapshotTime:  a.SnapshotTime,
+		})
 	}
 
 	results := make([]NearbyCarparkResult, len(nearby))
 	for i, cp := range nearby {
-		r := NearbyCarparkResult{
+		key := cp.CarparkCode + ":" + cp.DataSource
+		avail := availMap[key]
+		if avail == nil {
+			avail = []AvailabilityDetail{}
+		}
+		results[i] = NearbyCarparkResult{
 			CarparkCode:   cp.CarparkCode,
 			CarparkName:   cp.CarparkName,
 			DataSource:    cp.DataSource,
@@ -116,15 +125,61 @@ func GetNearby(ctx context.Context, pool *pgxpool.Pool, lat, lon, radiusM float6
 			Lon:           cp.Lon,
 			DistanceM:     math.Round(cp.DistanceM),
 			ParkingSystem: cp.ParkingSystem,
-			TotalLots:     cp.TotalLots,
+			Availability:  avail,
 		}
-		if a, ok := availMap[cp.CarparkCode+":"+cp.DataSource]; ok {
-			r.LotsAvailable = &a.LotsAvailable
-			r.SnapshotTime = &a.SnapshotTime
-		}
-		results[i] = r
 	}
 	return results, NearbyMeta{Count: len(results), RadiusM: radiusM}, nil
+}
+
+func GetBatch(ctx context.Context, pool *pgxpool.Pool, lat, lon float64, codes []string) ([]NearbyCarparkResult, error) {
+	carparks, err := repository.GetByCodes(ctx, pool, codes, lat, lon)
+	if err != nil {
+		return nil, err
+	}
+	if len(carparks) == 0 {
+		return []NearbyCarparkResult{}, nil
+	}
+
+	carparkCodes := make([]string, len(carparks))
+	for i, cp := range carparks {
+		carparkCodes[i] = cp.CarparkCode
+	}
+
+	avail, err := repository.GetLatestAvailability(ctx, pool, carparkCodes)
+	if err != nil {
+		return nil, err
+	}
+
+	availMap := make(map[string][]AvailabilityDetail)
+	for _, a := range avail {
+		key := a.CarparkCode + ":" + a.DataSource
+		availMap[key] = append(availMap[key], AvailabilityDetail{
+			VehicleType:   a.VehicleType,
+			LotsAvailable: a.LotsAvailable,
+			TotalLots:     a.TotalLots,
+			SnapshotTime:  a.SnapshotTime,
+		})
+	}
+
+	results := make([]NearbyCarparkResult, len(carparks))
+	for i, cp := range carparks {
+		key := cp.CarparkCode + ":" + cp.DataSource
+		a := availMap[key]
+		if a == nil {
+			a = []AvailabilityDetail{}
+		}
+		results[i] = NearbyCarparkResult{
+			CarparkCode:   cp.CarparkCode,
+			CarparkName:   cp.CarparkName,
+			DataSource:    cp.DataSource,
+			Lat:           cp.Lat,
+			Lon:           cp.Lon,
+			DistanceM:     math.Round(cp.DistanceM),
+			ParkingSystem: cp.ParkingSystem,
+			Availability:  a,
+		}
+	}
+	return results, nil
 }
 
 func GetCarparkDetail(ctx context.Context, pool *pgxpool.Pool, code, source string) (*CarparkDetail, error) {
@@ -154,7 +209,6 @@ func GetCarparkDetail(ctx context.Context, pool *pgxpool.Pool, code, source stri
 		ParkingSystem: cp.ParkingSystem,
 		Lat:           cp.Lat,
 		Lon:           cp.Lon,
-		TotalLots:     cp.TotalLots,
 		Availability:  []AvailabilityDetail{},
 	}
 
@@ -181,6 +235,7 @@ func GetCarparkDetail(ctx context.Context, pool *pgxpool.Pool, code, source stri
 			})
 		}
 	}
+
 	return detail, nil
 }
 
@@ -204,7 +259,7 @@ func GetAvailability(ctx context.Context, pool *pgxpool.Pool, code, source strin
 	return results, nil
 }
 
-func GetRates(ctx context.Context, pool *pgxpool.Pool, code, source string) (*RatesResult, error) {
+func GetRates(ctx context.Context, pool *pgxpool.Pool, code, source string, phDates map[string]bool) (*RatesResult, error) {
 	shortTerm, err := repository.GetShortTermRates(ctx, pool, code, source)
 	if err != nil {
 		return nil, err
@@ -214,6 +269,9 @@ func GetRates(ctx context.Context, pool *pgxpool.Pool, code, source string) (*Ra
 	if err != nil {
 		return nil, err
 	}
+
+	now := time.Now().In(sgt)
+	dayType := currentDayType(now, phDates)
 
 	result := &RatesResult{
 		ShortTerm: make([]ShortTermRateResult, len(shortTerm)),
@@ -227,6 +285,20 @@ func GetRates(ctx context.Context, pool *pgxpool.Pool, code, source string) (*Ra
 			EndTime:      r.EndTime,
 			RatePer30Min: r.RatePer30Min,
 			MinDuration:  r.MinDuration,
+			IsCurrent:    isCurrentRate(r.DayType, r.StartTime, r.EndTime, now, dayType),
+		}
+	}
+	// If a specific day_type row is active for a vehicle type, suppress overlapping "all" rows
+	// so that e.g. sunday_ph free parking takes priority over the base "all" rate.
+	activeSpecific := make(map[string]bool)
+	for _, r := range result.ShortTerm {
+		if r.IsCurrent && r.DayType != "all" {
+			activeSpecific[r.VehicleType] = true
+		}
+	}
+	for i, r := range result.ShortTerm {
+		if r.DayType == "all" && activeSpecific[r.VehicleType] {
+			result.ShortTerm[i].IsCurrent = false
 		}
 	}
 	for i, r := range season {
@@ -238,4 +310,51 @@ func GetRates(ctx context.Context, pool *pgxpool.Pool, code, source string) (*Ra
 		}
 	}
 	return result, nil
+}
+
+// currentDayType returns the URA-style day type for the given time,
+// accounting for Singapore public holidays (treated as sunday_ph).
+func currentDayType(t time.Time, phDates map[string]bool) string {
+	if phDates[t.Format("2006-01-02")] {
+		return "sunday_ph"
+	}
+	switch t.Weekday() {
+	case time.Sunday:
+		return "sunday_ph"
+	case time.Saturday:
+		return "saturday"
+	default:
+		return "weekday"
+	}
+}
+
+// isCurrentRate returns true if the given rate row is active right now.
+// Handles overnight ranges (e.g. 22:00–07:00) and day_type="all".
+func isCurrentRate(dayType, startTime, endTime string, now time.Time, todayType string) bool {
+	if dayType != "all" && dayType != todayType {
+		return false
+	}
+	start, err1 := parseTimeOfDayMins(startTime)
+	end, err2 := parseTimeOfDayMins(endTime)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	nowMins := now.Hour()*60 + now.Minute()
+	if end <= start {
+		// Overnight range: active if now >= start OR now < end
+		return nowMins >= start || nowMins < end
+	}
+	return nowMins >= start && nowMins < end
+}
+
+// parseTimeOfDayMins parses "HH:MM" or "HH:MM:SS" into minutes since midnight.
+func parseTimeOfDayMins(s string) (int, error) {
+	if len(s) < 5 {
+		return 0, fmt.Errorf("invalid time: %s", s)
+	}
+	var h, m int
+	if _, err := fmt.Sscanf(s[:5], "%d:%d", &h, &m); err != nil {
+		return 0, err
+	}
+	return h*60 + m, nil
 }

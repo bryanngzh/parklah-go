@@ -107,6 +107,37 @@ func GetNearby(ctx context.Context, pool *pgxpool.Pool, lat, lon, radiusM float6
 	return results, rows.Err()
 }
 
+func GetByCodes(ctx context.Context, pool *pgxpool.Pool, codes []string, lat, lon float64) ([]NearbyCarpark, error) {
+	const sql = `
+	SELECT carpark_code, carpark_name, data_source, lat, lon, parking_system, total_lots,
+	    (6371000 * acos(LEAST(1.0,
+	        cos(radians($1)) * cos(radians(lat)) * cos(radians(lon) - radians($2))
+	        + sin(radians($1)) * sin(radians(lat))
+	    ))) AS distance_m
+	FROM carparks
+	WHERE carpark_code = ANY($3) AND lat IS NOT NULL
+	ORDER BY distance_m`
+
+	rows, err := pool.Query(ctx, sql, lat, lon, codes)
+	if err != nil {
+		return nil, fmt.Errorf("query batch carparks: %w", err)
+	}
+	defer rows.Close()
+
+	var results []NearbyCarpark
+	for rows.Next() {
+		var r NearbyCarpark
+		if err := rows.Scan(
+			&r.CarparkCode, &r.CarparkName, &r.DataSource,
+			&r.Lat, &r.Lon, &r.ParkingSystem, &r.TotalLots, &r.DistanceM,
+		); err != nil {
+			return nil, fmt.Errorf("scan batch carpark: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
 func GetByCode(ctx context.Context, pool *pgxpool.Pool, code, source string) (*CarparkRow, error) {
 	const sql = `
 		SELECT carpark_code, carpark_name, data_source, carpark_type, parking_system, lat, lon, total_lots

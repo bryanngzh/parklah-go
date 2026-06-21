@@ -91,7 +91,7 @@ type SeasonRateRow struct {
 func GetShortTermRates(ctx context.Context, pool *pgxpool.Pool, code, source string) ([]ShortTermRateRow, error) {
 	const sql = `
 		SELECT vehicle_type, day_type,
-		       COALESCE(start_time::text, ''), COALESCE(end_time::text, ''),
+		       COALESCE(TO_CHAR(start_time, 'HH24:MI'), ''), COALESCE(TO_CHAR(end_time, 'HH24:MI'), ''),
 		       rate_per_30min, COALESCE(min_duration, '')
 		FROM carpark_short_term_rates
 		WHERE carpark_code = $1 AND data_source = $2

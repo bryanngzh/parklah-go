@@ -19,7 +19,8 @@ func IsPeakHour(code string) bool    { return peakHourCarparks[code] }
 
 // DeriveShortTermRates generates the standardised HDB short-term rate rows for a carpark.
 // Rates are sourced from the HDB website and derived from the carpark's classification.
-func DeriveShortTermRates(carparkCode string) []models.ShortTermRate {
+// If freeParking is true, zero-rate rows are added for Sunday/PH 07:00–22:30.
+func DeriveShortTermRates(carparkCode string, freeParking bool) []models.ShortTermRate {
 	isCentral := IsCentralArea(carparkCode)
 	isPeak := IsPeakHour(carparkCode)
 
@@ -45,6 +46,12 @@ func DeriveShortTermRates(carparkCode string) []models.ShortTermRate {
 		hdbRate(carparkCode, "M", "all", "00:00", "23:59", 0.65),
 		hdbRate(carparkCode, "H", "all", "00:00", "23:59", 1.20),
 	)
+
+	if freeParking {
+		for _, vt := range []string{"C", "M", "H"} {
+			rates = append(rates, hdbRate(carparkCode, vt, "sunday_ph", "07:00", "22:30", 0.00))
+		}
+	}
 
 	return rates
 }

@@ -72,7 +72,7 @@ func main() {
 		log.Fatalf("[main] upsert HDB features: %v", err)
 	}
 
-	hdbRates := deriveHDBRates(hdbCarparks)
+	hdbRates := deriveHDBRates(hdbCarparks, hdbFeatures)
 	log.Printf("[hdb] derived %d short-term rate rows", len(hdbRates))
 	if err := repository.UpsertShortTermRates(ctx, pool, hdbRates); err != nil {
 		log.Fatalf("[main] upsert HDB short-term rates: %v", err)
@@ -104,10 +104,14 @@ func main() {
 	log.Println("[main] Ingestion complete")
 }
 
-func deriveHDBRates(carparks []models.Carpark) []models.ShortTermRate {
+func deriveHDBRates(carparks []models.Carpark, features []models.Features) []models.ShortTermRate {
+	freeParking := make(map[string]bool, len(features))
+	for _, f := range features {
+		freeParking[f.CarparkCode] = f.FreeParking != "NO"
+	}
 	var rates []models.ShortTermRate
 	for _, cp := range carparks {
-		rates = append(rates, hdb.DeriveShortTermRates(cp.CarparkCode)...)
+		rates = append(rates, hdb.DeriveShortTermRates(cp.CarparkCode, freeParking[cp.CarparkCode])...)
 	}
 	return rates
 }

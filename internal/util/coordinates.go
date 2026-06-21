@@ -13,9 +13,10 @@ func SVY21ToWGS84(easting, northing float64) (lat, lon float64) {
 		FE = 28001.642           // false easting
 		FN = 38744.572           // false northing
 
-		// SVY21 origin in degrees
-		lat0Deg = 1.0 + 22.0/60.0 + 2.9154/3600.0
-		lon0Deg = 103.0 + 49.0/60.0 + 31.9752/3600.0
+		// SVY21 projection natural origin (EPSG:3414)
+		// lat_0 = 1°22'00"N, lon_0 = 103°50'00"E
+		lat0Deg = 1.0 + 22.0/60.0
+		lon0Deg = 103.0 + 50.0/60.0
 	)
 
 	lat0 := lat0Deg * math.Pi / 180

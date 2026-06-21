@@ -10,6 +10,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type batchRequest struct {
+	Codes []string `json:"codes"`
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -75,27 +79,43 @@ func GetNearby(pool *pgxpool.Pool) http.HandlerFunc {
 			radius = 2000
 		}
 
-		vehicleType := r.URL.Query().Get("vehicle_type")
-		if vehicleType == "" {
-			vehicleType = "C"
-		}
-		if vehicleType != "C" && vehicleType != "M" && vehicleType != "H" {
-			writeError(w, http.StatusBadRequest, "vehicle_type must be C, M or H")
-			return
-		}
-
 		limit := queryInt(r, "limit", 20)
 		if limit > 50 {
 			limit = 50
 		}
 
-		results, meta, err := services.GetNearby(r.Context(), pool, lat, lon, radius, vehicleType, limit)
+		results, meta, err := services.GetNearby(r.Context(), pool, lat, lon, radius, limit)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to fetch nearby carparks")
 			return
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{"data": results, "meta": meta})
+	}
+}
+
+func GetBatch(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		lat, ok1 := queryFloat(r, "lat")
+		lon, ok2 := queryFloat(r, "lon")
+		if !ok1 || !ok2 {
+			writeError(w, http.StatusBadRequest, "lat and lon are required")
+			return
+		}
+
+		var body batchRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Codes) == 0 {
+			writeError(w, http.StatusBadRequest, "body must be {\"codes\": [...]}")
+			return
+		}
+
+		results, err := services.GetBatch(r.Context(), pool, lat, lon, body.Codes)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to fetch batch carparks")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"data": results, "meta": map[string]any{"count": len(results)}})
 	}
 }
 
@@ -139,7 +159,7 @@ func GetAvailability(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-func GetRates(pool *pgxpool.Pool) http.HandlerFunc {
+func GetRates(pool *pgxpool.Pool, phDates map[string]bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		code := chi.URLParam(r, "code")
 		source, ok := requireSource(w, r)
@@ -147,7 +167,7 @@ func GetRates(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		rates, err := services.GetRates(r.Context(), pool, code, source)
+		rates, err := services.GetRates(r.Context(), pool, code, source, phDates)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to fetch rates")
 			return

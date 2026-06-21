@@ -11,6 +11,7 @@ import (
 	"github.com/bryanngzh/parklah-go/internal/config"
 	"github.com/bryanngzh/parklah-go/internal/db"
 	"github.com/bryanngzh/parklah-go/internal/handlers"
+	"github.com/bryanngzh/parklah-go/internal/util"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -25,6 +26,21 @@ func main() {
 	defer pool.Close()
 	log.Println("[api] Connected to database")
 
+	// Fetch Singapore public holidays for current and next year at startup
+	phDates := make(map[string]bool)
+	now := time.Now()
+	for _, year := range []int{now.Year(), now.Year() + 1} {
+		ph, err := util.FetchSGPublicHolidays(context.Background(), year)
+		if err != nil {
+			log.Printf("[api] Warning: failed to fetch SG public holidays for %d: %v", year, err)
+			continue
+		}
+		for k := range ph {
+			phDates[k] = true
+		}
+	}
+	log.Printf("[api] Loaded %d SG public holiday dates", len(phDates))
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
@@ -32,9 +48,10 @@ func main() {
 
 	r.Route("/v1/carparks", func(r chi.Router) {
 		r.Get("/nearby", handlers.GetNearby(pool))
+		r.Post("/batch", handlers.GetBatch(pool))
 		r.Get("/{code}", handlers.GetCarpark(pool))
 		r.Get("/{code}/availability", handlers.GetAvailability(pool))
-		r.Get("/{code}/rates", handlers.GetRates(pool))
+		r.Get("/{code}/rates", handlers.GetRates(pool, phDates))
 	})
 
 	addr := ":" + cfg.APIPort
